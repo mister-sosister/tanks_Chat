@@ -1,0 +1,182 @@
+import threading
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.fernet import Fernet
+import socket
+import servside_client
+import queue
+import json
+import os
+
+sym_key = Fernet.generate_key()
+key_obj = Fernet(sym_key)
+
+priv_key = rsa.generate_private_key(65537, 4096)
+pub_key = priv_key.public_key()
+PORT = None
+IPADRESS = None
+clients : list[servside_client.ClientOnServer] = [] 
+
+endevent = threading.Event
+#[+] — успех, положительное событие.
+#[-] — ошибка или что-то пошло не так.
+#[*] — информация общего характера (обычно «статус»).
+#[!] — предупреждение (что-то потенциально опасное, но не критично).
+#[?] — запрос/ожидание ввода пользователя.
+#[>] — процесс/действие выполняется.
+#[<] — получено что-то (например, ответ от сервера).
+
+def configRead():
+    global PORT, IPADRESS
+    configfile = os.path.join(os.path.dirname(__file__), "serv_config.json")
+    
+    a = open(configfile, "r")
+    b = json.load(a)
+    PORT = b["server"]["port"]
+    IPADRESS = b["server"]["ip"]
+    print(IPADRESS)
+    print(PORT)
+    
+   
+    
+    
+def DataAnalys(client : servside_client.ClientOnServer):
+
+    while True:
+        if endevent.is_set():
+            return
+        try:
+            data = client.dataq.get(timeout=1)
+            print(f"получено сообщение {data}")
+        except queue.Empty:
+            continue
+        
+        if data["code"] == "101":
+            
+            if getUserWithLogin(data["login"]) != None:
+                messaging_client(client, {"code" : "103", "message" : (f"[<] login {data['login']} is already taken")})
+                print(f"логин {data['login']} уже занят")
+                messaging_client(client, {"code" : "100"})
+            else:
+                setting_client(client, data)
+                messaging_client(client, {"code" : "104", "message" : f"login {data['login']} "})
+        elif data["code"] == "201":
+            messaging_client(getUserWithLogin(data["whom"]), {"code" : "202", "message" : data["what"], "from" : client.login})
+        elif data["code"] == "302":
+            setting_client(client, data)
+        elif data["code"] == "404":
+            print(f"пользователь {client.login} отключился")
+            return
+
+
+def dataTakeOut(bytenum, socket):
+    retstr = b""
+    while len(retstr) < bytenum:
+        takendata = socket.recv(bytenum - len(retstr))
+        retstr += takendata
+        
+    return retstr
+
+def returnOneMsg(socket):
+    bytehead = dataTakeOut(4, socket)
+    head = int.from_bytes(bytehead, "big")
+    msg = dataTakeOut(head, socket)
+    return msg
+
+
+def DataTake(client : servside_client.ClientOnServer):
+    global clients
+    while True:
+        try:
+            server_data = returnOneMsg(client.socket)
+        except ConnectionResetError:
+            clients.remove(client)
+            client.dataq.put({"code" : "404"})
+            break
+        if client.gotSymKey == True:
+            decodedData = key_obj.decrypt(server_data)
+        elif client.key != None:
+            decodedData = priv_key.decrypt(server_data, padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None))
+        else:
+            decodedData = server_data
+        a = json.loads(decodedData.decode())
+
+        client.dataq.put(a)
+
+
+def byteStrToPack(bytestring):
+    sendstring = int.to_bytes(len(bytestring), 4, "big") + bytestring
+    return sendstring
+
+def messaging_client(client: servside_client.ClientOnServer, senddict: dict):
+    tosenddict = json.dumps(senddict)
+    if client.key == None and client.gotSymKey == False:
+        
+        client.socket.send(byteStrToPack(tosenddict.encode()))
+    elif client.gotSymKey == True:
+        sbtsdict = tosenddict.encode()
+        client.socket.send(byteStrToPack(key_obj.encrypt(sbtsdict)))
+    else:
+
+        sbtsdict = tosenddict.encode()
+        client.socket.send(byteStrToPack(client.key.encrypt(sbtsdict, padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None))))
+    
+    print(f"оптравлено сообщение {tosenddict} типа {type(tosenddict)}")
+        
+def setting_client(client: servside_client.ClientOnServer, whattoset):
+    if whattoset["code"] == "101":
+        client.login = whattoset["login"]
+        messaging_client(client, {"code" : "103", "message" : (f"[<] логин {whattoset['login']} задан")})
+        messaging_client(client, {"code" : "403", "message" : "данные клиента были изменены"})
+        print(client.login)
+        
+    elif whattoset["code"] == "302":
+        client.key = serialization.load_pem_public_key(whattoset["key"].encode())
+        messaging_client(client, {"code" : "303", "key" : sym_key.decode()})
+        print("отправлен симметричный ключ")
+        client.gotSymKey = True
+        #messaging_client(client, {"code" : "100"})
+    
+def commanding():
+    while True:
+        command = int(input())
+        if command == "endserver":
+            endevent.set()
+    
+    
+def getUserWithLogin(login : str):
+    global clients
+    for i in range(len(clients)):
+        print(clients[i].login)
+        if clients[i].login == login:
+            return clients[i]
+    return None
+#байты - расшифровка байтов - превращение в текст - превращение в словарь
+def accepting_connections():
+    global pub_key
+    newsocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    newsocket.bind((IPADRESS, PORT))
+    newsocket.listen()
+    
+    while True:
+        socket_data = newsocket.accept()
+        socket_data[0].settimeout(1)
+        a = servside_client.ClientOnServer(socket_data[0])
+        clients.append(a)
+        a.startTakeIn(DataTake)
+        a.startanAlysis(DataAnalys)
+        print(f"[+] клиент {socket_data[1]} был подключен")
+        messaging_client(a, {"code" : "301", "key" : pub_key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode("utf-8")})
+        
+        
+def launchServ():
+    configRead()
+    print("[>] сервер запускается")
+    
+    accepting_connections()
+
+
+    
+launchServ()
+
+
