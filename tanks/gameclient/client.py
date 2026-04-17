@@ -19,16 +19,21 @@ SYMKEYEXC = "SYMKEYEXC"
 SENDINGLOGIN = "SENDINGLOGIN"
 AUTHORISED = "AUTHORISED"
 ISINVITED = "ISINVITED"
+INLOBBY = "INLOBBY"
 
 
 stage = NOCONNECTION
 
-server_public_key = None
+
 sym_key = None
 sym_str_key = None
 
+
 priv_key = rsa.generate_private_key(65537, 4096)
 pub_key = priv_key.public_key()
+pub_key_str = pub_key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+
+lastinvite = None
 
 userlogin = None
 
@@ -60,30 +65,38 @@ def byteStrToPack(bytestring):
     
     return sendstring
 
-def messaging_server( senddict: dict):
+def messaging_server_sym( senddict: dict):
+    #переписать тк половина стадий пропадет. оставить только симметричный ключ, остальное вынести
     global stage, server_public_key
     #3 проверка на шифровку симметричным ключом
-    if stage == SYMKEYEXC or stage == AUTHORISED:
-        print("зашифровка симметричным ключом")
-        tosenddict = json.dumps(senddict)
-        btosenddict = tosenddict.encode()
-        endict = sym_key.encrypt(btosenddict)
-        servsocket.send(byteStrToPack(endict))
+
+    print("зашифровка симметричным ключом")
+    tosenddict = json.dumps(senddict)
+    btosenddict = tosenddict.encode()
+    endict = sym_key.encrypt(btosenddict)
+    servsocket.send(byteStrToPack(endict))
+    print(f"оптравлено сообщение {tosenddict} типа {type(tosenddict)}")   
+
+       
         
-    elif stage == PUBKEYEXC:
-        print("зашифровка публичным ключом")
-        tosenddict = json.dumps(senddict)
-        btosenddict = tosenddict.encode()
-        endict = server_public_key.encrypt(btosenddict, padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None))
-        servsocket.send(byteStrToPack(endict))
+    
         
-    elif stage == CONNECTED:
-        tosenddict = json.dumps(senddict)
-        servsocket.send(byteStrToPack(tosenddict.encode()))
-        
+def messaging_server_none(senddict : dict):  
+    tosenddict = json.dumps(senddict)
+    servsocket.send(byteStrToPack(tosenddict.encode()))
+    print(f"оптравлено сообщение {tosenddict} типа {type(tosenddict)}")
+    
+def messaging_server_pub(senddict: dict):
+    global server_public_key
+    print("зашифровка публичным ключом")
+    tosenddict = json.dumps(senddict)
+    btosenddict = tosenddict.encode()
+    endict = server_public_key.encrypt(btosenddict, padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None))
+    servsocket.send(byteStrToPack(endict))
+    
     print(f"оптравлено сообщение {tosenddict} типа {type(tosenddict)}")
 def dataAnalys():
-    global dataq, server_public_key, pub_key, sym_key, sym_str_key, login
+    global dataq, server_public_key, pub_key, sym_key, sym_str_key, login, lastinvite
     while True:
         
         try:
@@ -93,6 +106,7 @@ def dataAnalys():
             continue
         #if data["code"] == "100":
         #    loginCon = False
+        print(data)
         if data["code"] == "103":
             print(data["message"])
         elif data["code"] == "104":
@@ -100,28 +114,31 @@ def dataAnalys():
             
         elif data["code"] == "202":
             print(data["message"])
-        elif data["code"] == "301":
-            bytekey = data["key"].encode()
-            server_public_key = serialization.load_pem_public_key(bytekey)
-            messaging_server({"code" : "302", "key" : pub_key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()})
-            changingStages(PUBKEYEXC)
-        elif data["code"] == "303":
-            #sym_key = (data["key"].encode(), padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None))
-            sym_str_key = data["key"]
-            sym_key = Fernet(sym_str_key)
-            changingStages(SYMKEYEXC)
-            print(f"симметричный ключ {sym_key}")
+        #elif data["code"] == "303":
+        #    #sym_key = (data["key"].encode(), padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None))
+        #    sym_str_key = data["key"]
+        #    sym_key = Fernet(sym_str_key)
+        #    changingStages(SYMKEYEXC)
+        #    print(f"симметричный ключ {sym_key}")
         elif data["code"] == "403":
             print(data["message"])
         
         elif data["code"] == "502":
             print("было отправлено неправильное приглашение в лобби")
         elif data["code"] == "503":
+            print(data["message"])
+            lastinvite = data["fromlogin"]
             changingStages(ISINVITED)
+        elif data["code"] == "505":
+            print("теперь вы в лобби")
+            changingStages(INLOBBY)
+        elif data["code"] == "507":
+            print("игрок отказался от приглашения")
 
 def dataTakeOut(bytenum, socket):
     retstr = b""
     while len(retstr) < bytenum:
+        
         takendata = socket.recv(bytenum - len(retstr))
         retstr += takendata
 
@@ -139,19 +156,20 @@ def dataTake():
     while True:
         #try:
         server_data = returnOneMsg(servsocket)
-        print(f"стадия дешифровки {stage}")
-        if stage == PUBKEYEXC:
-            server_data = priv_key.decrypt(server_data, padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None))
-
-        elif stage == SYMKEYEXC or stage == AUTHORISED:
-            server_data = sym_key.decrypt(server_data)
-
-            
-        decodedData = server_data.decode("UTF-8")
-        if decodedData.strip() == "":
-            print("пришла пустая строка")
-        else:
-             dataq.put(json.loads(decodedData.strip()))
+        server_data = sym_key.decrypt(server_data)
+        print(f"пришло сообщение {server_data}")
+        
+        #elif stage == SYMKEYEXC or stage == AUTHORISED:
+        #    server_data = sym_key.decrypt(server_data)
+#
+        #    
+        
+        #if decodedData.strip() == "":
+        #    print("пришла пустая строка")
+        #else:
+        #    print(decodedData)
+        dataq.put(json.loads(server_data))
+        #    dataq.put(decodedData.strip())
         #except Exception as dataTakeException:
         #    print(f"Ошибка Datatake {dataTakeException}")
 
@@ -159,21 +177,21 @@ def dataTake():
 
 
 def commanding():
-    global condition, NOLOGINCON, userlogin
+    global condition, NOLOGINCON, userlogin, lastinvite
     while True:
         command = input()
         if command == "send":
             whoToSend = input("напишите логин пользователя: ")    
             whatToSend = input("сообщение: ")
-            messaging_server({"code" : "201", "whom" : whoToSend, "what" : whatToSend})
-        elif command == "send login":
-            
-            login = input("введите логин ")
-            messaging_server({"code": "101", "login" : login})
-            userlogin = login
+            messaging_server_sym({"code" : "201", "whom" : whoToSend, "what" : whatToSend})
+        #elif command == "send login":
+        #    
+        #    login = input("введите логин ")
+        #    messaging_server_sym({"code": "101", "login" : login})
+        #    userlogin = login
         elif command == "group":
             tologin = (input("введите логин игрока для приглашения "))
-            messaging_server({"code" : "501", "tologin" : tologin, "fromlogin" : login})
+            messaging_server_sym({"code" : "501", "tologin" : tologin, "fromlogin" : userlogin})
             
         elif command == "mylobby":
             if stage == ISINVITED:
@@ -181,19 +199,32 @@ def commanding():
                 answer = input()
                 if answer == "yes":
                     #сделать класс лобби
-                    pass
-        
+                    messaging_server_sym({"code" : "504", "flogin" : userlogin, "slogin" : lastinvite})
+                    changingStages(INLOBBY)
+                elif answer == "no":
+                    messaging_server_sym({"code" : "506", "slogin" : lastinvite})
 
 def connectingts():
     
-    global servsocket
+    global userlogin,servsocket, sym_key, sym_str_key
     configRead()
     servsocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     servsocket.connect((IPADRESS, PORT))   
+    messaging_server_none({"code" : "302", "key" : pub_key_str.decode()})
+    sym_str_key = json.loads(priv_key.decrypt(returnOneMsg(servsocket), padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None)))
+    print("1")
+    print(sym_str_key)
+    print(type(sym_str_key))
+    sym_key = Fernet(sym_str_key["key"])
+    print("3")
+    userlogin = input("введите логин ")
+    messaging_server_sym({"code" : "101", "login" : userlogin})
+    print("4")
     rec_thread = threading.Thread(target=dataTake, daemon=True)
     analysis_trd = threading.Thread(target=dataAnalys, daemon=True)
     com_thread = threading.Thread(target=commanding, daemon=True)
     changingStages(CONNECTED)
+    print("вы авторизовались")
     rec_thread.start()
     analysis_trd.start()
     com_thread.start()

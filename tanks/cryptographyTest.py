@@ -30,7 +30,7 @@ dkey = key.decode()
 
 en_dkey = pub_key.encrypt(dkey.encode(), padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None))
 de_dkey = priv_key.decrypt(en_dkey, padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None))
-
+print(de_dkey)
 key_obj = Fernet(de_dkey)
 
 

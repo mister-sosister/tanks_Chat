@@ -79,33 +79,35 @@
 #b.insert(maxin + 1, positivesumm)
 #print(b)
 
-maxtrix = [  [1, 2, 3, 4,5, 6],
-           [7, 8, 9, 10,90,12],
-           [13,14,15,16,17,18],
-           [19,20,21,22,23,24],
-           [25,40,27,28,29,30,],
-           [31,32,33,34,35,36]]
-
-
-maxup, maxdown = 0, 0
-iup, jup = 0, 0
-idown, jdown = 0, 0
-
-for i in range(len(maxtrix)):
-    for j in range(len(maxtrix)):
-        if i >= j and maxtrix[i][j] >= maxdown :
-           
-           idown, jdown = i, j
-           maxdown = maxtrix[i][j]
-        elif i < j and maxtrix[i][j] >= maxup:
-            
-            iup, jup = i, j
-            maxup = maxtrix[i][j]
-maxtrix[iup][jup], maxtrix[idown] [jdown] = maxtrix[idown][jdown], maxtrix[iup][jup]
-
-for i in maxtrix:
-    print(i)
+#maxtrix = [  [1, 2, 3, 4,5, 6],
+#           [7, 8, 9, 10,90,12],
+#           [13,14,15,16,17,18],
+#           [19,20,21,22,23,24],
+#           [25,40,27,28,29,30,],
+#           [31,32,33,34,35,36]]
+#
+#
+#maxup, maxdown = 0, 0
+#iup, jup = 0, 0
+#idown, jdown = 0, 0
+#
+#for i in range(len(maxtrix)):
+#    for j in range(len(maxtrix)):
+#        if i >= j and maxtrix[i][j] >= maxdown :
+#           
+#           idown, jdown = i, j
+#           maxdown = maxtrix[i][j]
+#        elif i < j and maxtrix[i][j] >= maxup:
+#            
+#            iup, jup = i, j
+#            maxup = maxtrix[i][j]
+#maxtrix[iup][jup], maxtrix[idown] [jdown] = maxtrix[idown][jdown], maxtrix[iup][jup]
+#
+#for i in maxtrix:
+#    print(i)
 
 
 
 #print([[j * 6 + i + 1 for i  in range(6)] for j in range(6)])
+
+print("123")
