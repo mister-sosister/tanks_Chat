@@ -6,7 +6,7 @@ import threading
 import queue
 import json
 import os
-
+from gamefiles import Game
 
 PORT = None
 IPADRESS = None
@@ -21,9 +21,11 @@ AUTHORISED = "AUTHORISED"
 ISINVITED = "ISINVITED"
 INLOBBY = "INLOBBY"
 
+endevent = threading.Event()
 
 stage = NOCONNECTION
 
+game = Game()
 
 sym_key = None
 sym_str_key = None
@@ -96,7 +98,7 @@ def messaging_server_pub(senddict: dict):
     
     print(f"оптравлено сообщение {tosenddict} типа {type(tosenddict)}")
 def dataAnalys():
-    global dataq, server_public_key, pub_key, sym_key, sym_str_key, login, lastinvite
+    global dataq, server_public_key, pub_key, sym_key, sym_str_key, login, lastinvite, game
     while True:
         
         try:
@@ -122,7 +124,9 @@ def dataAnalys():
         #    print(f"симметричный ключ {sym_key}")
         elif data["code"] == "403":
             print(data["message"])
-        
+        elif data["code"] == "404":
+            print("сервер закрылся")
+            return
         elif data["code"] == "502":
             print("было отправлено неправильное приглашение в лобби")
         elif data["code"] == "503":
@@ -132,6 +136,9 @@ def dataAnalys():
         elif data["code"] == "505":
             print("теперь вы в лобби")
             changingStages(INLOBBY)
+            game_thread = threading.Thread(target=game.game_start(), daemon=True)
+            game_thread.start()
+            #запускать игру отдделньым потоком
         elif data["code"] == "507":
             print("игрок отказался от приглашения")
 
@@ -152,13 +159,16 @@ def returnOneMsg(socket):
 
 
 def dataTake():
-    global dataq, servsocket
+    global dataq, servsocket, endevent
     while True:
-        #try:
-        server_data = returnOneMsg(servsocket)
-        server_data = sym_key.decrypt(server_data)
-        print(f"пришло сообщение {server_data}")
-        
+        try:
+            server_data = returnOneMsg(servsocket)
+            server_data = sym_key.decrypt(server_data)
+            print(f"пришло сообщение {server_data}")
+        except ConnectionResetError:
+            endevent.set()
+            dataq.put({"code" : "404"})
+            return
         #elif stage == SYMKEYEXC or stage == AUTHORISED:
         #    server_data = sym_key.decrypt(server_data)
 #
@@ -180,6 +190,8 @@ def commanding():
     global condition, NOLOGINCON, userlogin, lastinvite
     while True:
         command = input()
+        if endevent.is_set():
+            return
         if command == "send":
             whoToSend = input("напишите логин пользователя: ")    
             whatToSend = input("сообщение: ")
@@ -192,7 +204,7 @@ def commanding():
         elif command == "group":
             tologin = (input("введите логин игрока для приглашения "))
             messaging_server_sym({"code" : "501", "tologin" : tologin, "fromlogin" : userlogin})
-            
+             
         elif command == "mylobby":
             if stage == ISINVITED:
                 print("у вас есть приглашение в группу, введите ответ yes/no")

@@ -80,6 +80,7 @@ def DataAnalys(client : servside_client.ClientOnServer):
             a = lobby.game_lobby(data["flogin"], data["slogin"])
             a.check_status()
             lobbies.append(a)
+            messaging_client_sym(getUserWithLogin(data["flogin"]), {"code" : "505"})
             messaging_client_sym(getUserWithLogin(data["slogin"]), {"code" : "505"})
         elif data["code"] == "506":
             messaging_client_sym(getUserWithLogin(data["slogin"]), {"code" : "507"})
@@ -213,15 +214,18 @@ def accepting_connections():
     newsocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     newsocket.bind((IPADRESS, PORT))
     newsocket.listen()
-    
+    newsocket.settimeout(1)
     while True:
-
-        socket_data = newsocket.accept()
-        socket_data[0].settimeout(1)
-
+        try:
+            socket_data = newsocket.accept()
+            socket_data[0].settimeout(1)
         #добавить таймаут к сокетдате
-        threading.Thread(target=auth_user, daemon= True, args=(socket_data[0], )).start()
-
+            threading.Thread(target=auth_user, daemon= True, args=(socket_data[0], )).start()
+        except TimeoutError:
+            if endevent.is_set():
+                return
+            else:
+                continue
         
 def launchServ():
     configRead()

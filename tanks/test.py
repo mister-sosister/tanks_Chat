@@ -1,3 +1,4 @@
+import queue
 #abc = "привет"
 #babc = abc.encode()
 #pack = int.to_bytes(len(babc), 4, "big") + babc + b"asdfgjkdsgf"
@@ -110,4 +111,19 @@
 
 #print([[j * 6 + i + 1 for i  in range(6)] for j in range(6)])
 
-print("123")
+#print("123")
+
+#a = []
+#b = int(input())
+#while b != 0:
+#    a.append(b)
+#    b = int(input())
+#a.sort()
+#print(a[-1] + a[-2])
+#print(a[0] + a[1])
+
+a = queue.Queue()
+a.put(1)
+a.put(1)
+a.put(1)
+print(list(a.queue))
